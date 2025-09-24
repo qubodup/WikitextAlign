@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Align Wikitext Template Tool</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial;margin:18px;background:#f7f8fb;color:#111}
+    h1{font-size:18px;margin:0 0 8px}
+    .wrap{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+    textarea{width:100%;height:360px;padding:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,monospace;font-size:13px;resize:vertical;border:1px solid #d6dbe9;background:white;border-radius:6px}
+    .controls{display:flex;gap:8px;margin-top:8px}
+    button{background:#0b66ff;color:white;border:none;padding:8px 10px;border-radius:8px;cursor:pointer}
+    button.secondary{background:#e6ecff;color:#0b66ff}
+    .foot{grid-column:1/-1;margin-top:10px;color:#444;font-size:13px}
+    label{font-size:13px;color:#333;margin-bottom:6px;display:block}
+  </style>
+</head>
+<body>
+  <h1>Align Wikitext Template Tool by = equal sign and normalize spaces tool</h1>
+  <p style="margin:6px 0 14px;color:#444">Paste your text on the left, the right updates automatically with normalized output. The tool removes leading spaces, splits inline templates into multiple lines, adds one space around <code>=</code>, and aligns all equals signs vertically — while keeping surrounding braces and other text intact, with the closing <code>}}</code> on its own line.</p>
+
+  <div class="wrap">
+    <div>
+      <label for="input">Input</label>
+      <textarea id="input" spellcheck="false">{{Template|title1=MoonbaseExample|image1=Sample.jpg|genre=Joke {{!}} Comedy|website=[https://example.com|example.com]]}}</textarea>
+    </div>
+
+    <div>
+      <label for="output">Output</label>
+      <textarea id="output" spellcheck="false" readonly></textarea>
+      <div class="controls">
+        <button id="copy">Copy output</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">Tip: The tool splits template blobs (e.g. <code>{{...|...|...}}</code>) into separate lines for each parameter automatically, and puts the closing <code>}}</code> on its own line.</div>
+
+  <script>
+    const inputEl = document.getElementById('input');
+    const outputEl = document.getElementById('output');
+    const copyBtn = document.getElementById('copy');
+
+	function preprocessTemplates(text) {
+		// Protect {{!}} first
+		const placeholder = "__PIPE_PLACEHOLDER__";
+		text = text.replace(/{{!}}/g, placeholder);
+	
+		// Handle {{...}} blocks, splitting only on top-level pipes
+		return text.replace(/{{([^{}]*)}}/gs, (match, inner) => {
+			let parts = [];
+			let current = '';
+			let depthSquare = 0; // track [[ ]]
+			let depthSingle = 0; // track [ ]
+			for (let i = 0; i < inner.length; i++) {
+				const ch = inner[i];
+				const next = inner[i + 1];
+
+				// Track start of [[
+				if (ch === '[' && next === '[') {
+					depthSquare++;
+					current += ch;
+				}
+				// Track end of ]]
+				else if (ch === ']' && next === ']' && depthSquare > 0) {
+					depthSquare--;
+					current += ch;
+				}
+				// Track start of [ (single, external link)
+				else if (ch === '[' && depthSquare === 0) {
+					depthSingle++;
+					current += ch;
+				}
+				// Track end of ] (single, external link)
+				else if (ch === ']' && depthSquare === 0 && depthSingle > 0) {
+					depthSingle--;
+					current += ch;
+				}
+				// Split on | only if not inside link brackets
+				else if (ch === '|' && depthSquare === 0 && depthSingle === 0) {
+					parts.push(current.trim());
+					current = '';
+				} else {
+					current += ch;
+				}
+			}
+			if (current.trim()) parts.push(current.trim());
+			
+			// Restore {{!}} placeholders inside values
+			parts = parts.map(p => p.replace(new RegExp(placeholder, 'g'), '{{!}}'));
+
+			return '{{' + parts.join('\n|') + '\n}}';
+		});
+	}
+
+    function normalizeText(text){
+      text = preprocessTemplates(text);
+      const lines = text.replace(/\r/g,'').split('\n').map(l=>l.trim());
+
+      const parsed = lines.map(line => {
+        if (!line.includes('=') || line.startsWith('{{') || line.startsWith('}}')) {
+          return {raw: line, isKV:false};
+        }
+        const idx = line.indexOf('=');
+        const left = line.slice(0, idx);
+        const right = line.slice(idx+1);
+        const pipeMatch = left.match(/^(\|)/);
+        const pipe = pipeMatch ? pipeMatch[1] : null;
+        const key = left.replace(/^(\|)/,'').trim();
+        const value = right.trim();
+        return {isKV:true, pipe, key, value};
+      });
+
+      const keyLengths = parsed.filter(p=>p.isKV).map(p=>p.key.length);
+      const maxKey = keyLengths.length ? Math.max(...keyLengths) : 0;
+
+      return parsed.map(p=>{
+        if (!p.isKV) return p.raw;
+        const paddedKey = p.key.padEnd(maxKey,' ');
+        const left = (p.pipe ? p.pipe+' ' : '') + paddedKey;
+        return left + ' = ' + p.value;
+      }).join('\n');
+    }
+
+    function updateOutput(){
+      outputEl.value = normalizeText(inputEl.value);
+    }
+
+    inputEl.addEventListener('input', updateOutput);
+    inputEl.addEventListener('change', updateOutput);
+
+    outputEl.addEventListener('click', ()=>{
+      outputEl.select();
+    });
+
+    copyBtn.addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(outputEl.value);
+        copyBtn.textContent = 'Copied!';
+        setTimeout(()=>copyBtn.textContent='Copy output',900);
+      }catch(e){
+        alert('Copy failed');
+      }
+    });
+
+    // Run once on load
+    updateOutput();
+  </script>
+</body>
+</html>
